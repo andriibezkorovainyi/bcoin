@@ -5,6 +5,7 @@
 
 const assert = require('bsert');
 const bio = require('bufio');
+const Address = require('../lib/primitives/address');
 const MTX = require('../lib/primitives/mtx');
 const Coin = require('../lib/primitives/coin');
 const Output = require('../lib/primitives/output');
@@ -15,6 +16,12 @@ const random = require('bcrypto/lib/random');
 const {taggedHash} = require('../lib/utils');
 const consensus = require('../lib/protocol/consensus');
 const opcodes = Script.opcodes;
+
+// https://github.com/bitcoin/bips/blob/master/bip-0341.mediawiki#Test_vectors
+const {
+  scriptPubKey,
+  keyPathSpending
+} = require('./data/bip341-wallet-test-vectors.json');
 
 // Create a BIP340 Schnorr keypair
 const priv = schnorr.privateKeyGenerate();
@@ -269,5 +276,73 @@ describe('Helper Functions', () => {
     assert(Buffer.compare(taprootTreeHelper([{ script: b }, { script: b }]), Buffer.from([0x12, 0x99, 0x1d, 0x5d, 0x42, 0x73, 0x5f, 0x67, 0x9b, 0xb1, 0xa2, 0x4a, 0x40, 0x26, 0xf4, 0xa6, 0xe4, 0xfb, 0xe4, 0x96, 0x12, 0xe2, 0xb9, 0x44, 0xf2, 0x6a, 0xb9, 0x31, 0x98, 0x25, 0x39, 0x12])) === 0, '2 same leaves');
     assert(Buffer.compare(taprootTreeHelper([{ script: b }, { script: c }]), Buffer.from([0x53, 0x14, 0x98, 0x4f, 0x24, 0xab, 0x8, 0x11, 0x3d, 0x57, 0x90, 0x63, 0x6c, 0x6c, 0x7f, 0xb8, 0xa0, 0x3, 0xe6, 0xb, 0x50, 0xe5, 0xb6, 0x0, 0xb6, 0x2e, 0x97, 0xd0, 0x41, 0x33, 0xe4, 0xa5])) === 0, '2 diff leaves');
     assert(Buffer.compare(taprootTreeHelper([{ script: b }, [{ script: c }], { script: d }, [{ script: f }, { script: g }]]), Buffer.from([0x7d, 0x6, 0x22, 0x7e, 0xc4, 0xd4, 0xdc, 0x84, 0xec, 0x46, 0xa6, 0x24, 0x81, 0xf8, 0x6c, 0xea, 0x34, 0x66, 0xd2, 0x47, 0x91, 0x84, 0xe5, 0xdc, 0x17, 0x14, 0x59, 0x76, 0xbf, 0x36, 0x1a, 0xef])) === 0, 'multiple levels');
+  });
+
+  describe('BIP341 test vectors', function() {
+    describe('scriptPubKey', function() {
+      // Conform test vectors from BIP341 json file
+      function conformScriptTree (scriptTree) {
+        if (!scriptTree)
+          return [];
+
+        if (Array.isArray(scriptTree))
+          return scriptTree.map(x => conformScriptTree(x));
+
+        return [{
+          script: Script.fromRaw(scriptTree.script, 'hex'),
+          // TODO: should we call it "leafVersion" in taproot.js as well?
+          version: scriptTree.leafVersion
+        }];
+      }
+
+      for (const test of scriptPubKey) {
+        it(test.expected.bip350Address, () => {
+          const {given, intermediary, expected} = test;
+          const tree = conformScriptTree(given.scriptTree);
+
+          // Test taproot tree helper
+          const treeRoot = taprootTreeHelper(tree);
+          // TODO: should taprootTreeHelper() return NULL if scripts.length === 0?
+          if (treeRoot.length === 0)
+            assert.strictEqual(null, intermediary.merkleRoot);
+          else
+            assert.strictEqual(treeRoot.toString('hex'), intermediary.merkleRoot);
+
+          // Test verifyTaprootCommitment()
+          // TODO: should we have a helper function for this?
+          let size;
+          if (treeRoot.length !== 0)
+            size = 64;
+          else
+            size = 32;
+          const tapTweak = bio.write(size);
+          tapTweak.writeBytes(Buffer.from(given.internalPubkey, 'hex'));
+          if (treeRoot.length !== 0)
+            tapTweak.writeBytes(treeRoot);
+          const tweak = taggedHash.TapTweakHash.digest(tapTweak.render());
+          assert.strictEqual(tweak.toString('hex'), intermediary.tweak);
+
+          // Test bcrypto schnorr.publicKeyTweakCheck()
+          if (expected.scriptPathControlBlocks) {
+            for (const cb of expected.scriptPathControlBlocks) {
+              assert(
+                schnorr.publicKeyTweakCheck(
+                  Buffer.from(given.internalPubkey, 'hex'),
+                  Buffer.from(intermediary.tweak, 'hex'),
+                  Buffer.from(intermediary.tweakedPubkey, 'hex'),
+                  Boolean(parseInt(cb.slice(0, 2), 16) & 1)
+                )
+              );
+            }
+          }
+
+          // Test bech32m
+          assert.strictEqual(
+            Address.fromScript(Script.fromRaw(expected.scriptPubKey, 'hex')).toString(),
+            expected.bip350Address
+          );
+        });
+      }
+    });
   });
 });
