@@ -318,6 +318,44 @@ describe('Wallet RPC Methods', function() {
     });
   });
 
+  it('should rpc abortRescan', async () => {
+    assert.strictEqual(wdb.height, 104);
+    assert.strictEqual(wdb.height, node.chain.height);
+
+    // When rescanning is not triggered
+    const response = await wclient.execute('abortrescan');
+    assert.strictEqual('rescanning is not running; abort does not make sense', response);
+
+    const handler = (wallet, data, details) => {
+        if (details.height === 51) {
+          wclient.execute('abortrescan');
+        }
+    };
+
+    wdb.on('confirmed', handler);
+
+    await wclient.execute('rescan', [0]);
+
+    assert.strictEqual(wdb.height, 51);
+    wdb.removeListener('confirmed', handler);
+  });
+
+  it('should not "rollback to the future"', async () => {
+    assert.strictEqual(wdb.height, 51);
+
+    await assert.rejects(
+      wclient.execute('rescan', [60]),
+      {message: 'WDB: Cannot rollback to the future.'}
+    );
+  });
+
+  it('should rpc rescan and finish rescan after abort', async () => {
+    assert.strictEqual(wdb.height, 51);
+    await wclient.execute('rescan', [40]);
+    assert.strictEqual(wdb.height, 104);
+    assert.strictEqual(wdb.height, node.chain.height);
+  });
+
   describe('signmessage', function() {
     const nonWalletAddress = '2N2PyYb9yKLhFzYfdWLr6LNsdzC9keVgK6f';
     const message = 'This is just a test message';
