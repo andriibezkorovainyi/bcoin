@@ -44,7 +44,7 @@ describe('Neutrino', function () {
       port: 10000,
       httpPort: 20000,
       logConsole: true,
-      logLevel: 'debug',
+      logLevel: 'spam',
       neutrino: true,
       only: '127.0.0.1'
     });
@@ -63,6 +63,15 @@ describe('Neutrino', function () {
     it('should initial sync', async () => {
       neutrinoNode.startSync();
       await forValue(neutrinoNode.chain, 'height', fullNode.chain.height);
+    });
+
+    it('should cfheaders and getcfilters', async () => {
+      const filterIndexer = neutrinoNode.filterIndexers.get('BASIC');
+      await forValue(filterIndexer, 'height', neutrinoNode.chain.height);
+      const filterHeight = filterIndexer.height;
+      assert.equal(filterHeight, neutrinoNode.chain.height);
+      const headerHeight = await neutrinoNode.pool.cfHeaderChain.tail.height;
+      assert.equal(headerHeight, neutrinoNode.chain.height);
     });
 
     it('should get new blocks headers-only', async () => {
@@ -133,6 +142,15 @@ describe('Neutrino', function () {
       await forValue(neutrinoNode.chain, 'height', fullNode.chain.height);
       assert(full);
       assert(neutrinoNode.chain.synced);
+    });
+
+    it('should getcfheaders and getcfilters', async () => {
+      const filterIndexer = neutrinoNode.filterIndexers.get('BASIC');
+      await forValue(filterIndexer, 'height', neutrinoNode.chain.height);
+      const filterHeight = filterIndexer.height;
+      assert.equal(filterHeight, neutrinoNode.chain.height);
+      const headerHeight = await neutrinoNode.pool.cfHeaderChain.tail.height;
+      assert.equal(headerHeight, neutrinoNode.chain.height);
     });
 
     it('should get new blocks headers-only', async () => {
